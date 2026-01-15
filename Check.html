@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="pt-pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Industrial - Checklist Empilhadores</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        body { background-color: #f8fafc; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .table-wrapper { max-height: 550px; overflow-y: auto; box-shadow: inset 0 0 10px rgba(0,0,0,0.05); }
+        thead th { position: sticky; top: 0; z-index: 20; background-color: #1e293b; color: white; }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }
+        .transition-all { transition: all 0.3s ease; }
+        
+        /* Estilo para a barra de alertas */
+        .alert-row { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="p-6 text-slate-800 bg-slate-100">
+
+    <header class="bg-white rounded-xl shadow-md p-5 mb-6 flex flex-col md:flex-row justify-between items-center border-l-8 border-blue-700">
+        <div class="flex items-center gap-4">
+            <div class="bg-blue-50 p-3 rounded-lg text-blue-700">
+                <i class="ph ph-list-checks text-3xl"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl font-extrabold text-slate-800 tracking-tight">Monitorização de CheckList</h1>
+                <p class="text-sm text-slate-500 font-medium">Controlo de Checklists e Manutenção</p>
+                
+                <div id="fileInfoBadge" class="hidden mt-2 inline-flex items-center gap-2 bg-slate-800 text-white text-sm font-bold px-3 py-1 rounded-md shadow-sm animate-pulse">
+                    <i class="ph ph-file-xls text-green-400"></i>
+                    <span id="fileNameDisplay"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex gap-3 mt-4 md:mt-0">
+            <input type="file" id="fileUpload" class="hidden" accept=".xlsx, .xls, .csv" />
+            <label for="fileUpload" class="cursor-pointer bg-slate-800 hover:bg-slate-700 text-white py-2.5 px-6 rounded-lg font-semibold flex items-center gap-2 transition-all shadow-lg hover:shadow-xl">
+                <i class="ph ph-microsoft-excel-logo text-lg"></i> Carregar Ficheiro
+            </label>
+        </div>
+    </header>
+
+    <div id="missingShiftsContainer" class="hidden mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm">
+        <h3 class="text-amber-800 font-bold flex items-center gap-2 mb-3">
+            <i class="ph ph-warning-octagon text-xl"></i> Atenção: Turnos em Falta
+        </h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm text-left">
+                <thead class="bg-amber-100 text-amber-900 uppercase text-xs">
+                    <tr>
+                        <th class="px-4 py-2 rounded-l-lg">Data</th>
+                        <th class="px-4 py-2">Turnos Realizados</th>
+                        <th class="px-4 py-2 font-bold text-red-600 rounded-r-lg">Turno Pendente</th>
+                    </tr>
+                </thead>
+                <tbody id="missingShiftsBody" class="text-slate-700">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm p-5 mb-6">
+        <h3 class="text-xs font-bold text-slate-400 uppercase mb-3 flex items-center gap-1">
+            <i class="ph ph-funnel"></i> Filtros Ativos
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            
+            <div class="relative">
+                <label class="absolute -top-2 left-2 bg-white px-1 text-xs font-bold text-blue-600">Turno</label>
+                <select id="filterTurno" onchange="applyFilters()" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-transparent">
+                    <option value="all">Todos os Turnos</option>
+                    <option value="1">1º Turno</option>
+                    <option value="2">2º Turno</option>
+                    <option value="3">3º Turno</option>
+                </select>
+            </div>
+
+            <div class="relative">
+                <label class="absolute -top-2 left-2 bg-white px-1 text-xs font-bold text-blue-600">Operador</label>
+                <select id="filterOperador" onchange="applyFilters()" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-transparent">
+                    <option value="all">Todos os Operadores</option>
+                </select>
+            </div>
+
+            <div class="relative">
+                <label class="absolute -top-2 left-2 bg-white px-1 text-xs font-bold text-blue-600">Data Específica</label>
+                <input type="date" id="filterData" onchange="applyFilters()" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-slate-600">
+            </div>
+
+            <button onclick="resetFilters()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2.5 rounded-lg transition-colors text-sm flex justify-center items-center gap-2">
+                <i class="ph ph-arrow-counter-clockwise"></i> Limpar Filtros
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-5 mb-6">
+        <div class="bg-white p-5 rounded-xl shadow-sm card-hover border-b-4 border-slate-600">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-slate-400 text-xs font-bold uppercase tracking-wider">Total Checklists</p>
+                    <h2 class="text-3xl font-black text-slate-800 mt-1" id="kpi-total">0</h2>
+                </div>
+                <div class="p-2 bg-slate-100 rounded text-slate-600"><i class="ph ph-stack text-xl"></i></div>
+            </div>
+        </div>
+        <div class="bg-white p-5 rounded-xl shadow-sm card-hover border-b-4 border-green-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-slate-400 text-xs font-bold uppercase tracking-wider">Conformes</p>
+                    <h2 class="text-3xl font-black text-green-600 mt-1" id="kpi-aprovados">0</h2>
+                </div>
+                <div class="p-2 bg-green-50 rounded text-green-600"><i class="ph ph-check-circle text-xl"></i></div>
+            </div>
+        </div>
+        <div class="bg-white p-5 rounded-xl shadow-sm card-hover border-b-4 border-red-500">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-slate-400 text-xs font-bold uppercase tracking-wider">Com Falhas</p>
+                    <h2 class="text-3xl font-black text-red-600 mt-1" id="kpi-reprovados">0</h2>
+                </div>
+                <div class="p-2 bg-red-50 rounded text-red-600"><i class="ph ph-warning text-xl"></i></div>
+            </div>
+        </div>
+        <div class="bg-white p-5 rounded-xl shadow-sm card-hover border-b-4 border-orange-400">
+            <div class="flex justify-between items-start">
+                <div>
+                    <p class="text-slate-400 text-xs font-bold uppercase tracking-wider">Índice Conformidade</p>
+                    <h2 class="text-3xl font-black text-orange-500 mt-1" id="kpi-conformidade">0%</h2>
+                </div>
+                <div class="p-2 bg-orange-50 rounded text-orange-500"><i class="ph ph-chart-pie-slice text-xl"></i></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="bg-white p-6 rounded-xl shadow-sm">
+            <h3 class="font-bold text-slate-700 mb-6 flex items-center gap-2 border-b pb-2">
+                <i class="ph ph-siren text-red-500"></i> Top Incidências de Falhas
+            </h3>
+            <div class="h-64">
+                <canvas id="chartFalhas"></canvas>
+            </div>
+        </div>
+        <div class="bg-white p-6 rounded-xl shadow-sm">
+            <h3 class="font-bold text-slate-700 mb-6 flex items-center gap-2 border-b pb-2">
+                <i class="ph ph-user-gear text-blue-500"></i> Volume por Operador
+            </h3>
+            <div class="h-64 flex justify-center">
+                <canvas id="chartOperador"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-200">
+        <div class="p-4 bg-slate-50 border-b flex justify-between items-center">
+            <h3 class="font-bold text-slate-700 flex items-center gap-2">
+                <i class="ph ph-table"></i> Registo Detalhado
+            </h3>
+            <span class="text-xs text-slate-400 bg-white px-2 py-1 rounded border">Mostrando dados filtrados</span>
+        </div>
+        <div class="table-wrapper">
+            <table class="w-full text-sm text-left text-slate-600">
+                <thead class="text-xs uppercase font-bold">
+                    <tr>
+                        <th class="px-4 py-3">Data</th>
+                        <th class="px-4 py-3">Hora</th>
+                        <th class="px-4 py-3 text-center">Turno</th>
+                        <th class="px-4 py-3">Operador</th>
+                        <th class="px-4 py-3">Máquina</th>
+                        <th class="px-4 py-3 text-center">Estado</th>
+                        <th class="px-4 py-3">Detalhes das Falhas</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody" class="divide-y divide-slate-100">
+                    <tr><td colspan="7" class="text-center py-10 text-slate-400 italic">Carregue a planilha para iniciar...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // --- VARIÁVEIS GLOBAIS ---
+        let allData = [];
+        let columnMap = {}; 
+        const failTerms = ["ng","NG"];
+        
+        const keyTerms = {
+            data: ["data", "date", "dia"],
+            hora: ["hora de início", "hora inicio", "inicio", "hora", "start"],
+            turno: ["turno", "shift"],
+            operador: ["operador", "Nome do Operador", "funcionário", "colaborador"],
+            maquina: ["capacidade", "empilhadeira", "empilhador", "máquina", "equipamento"],
+            horimetro: ["horímetro", "horimetro", "horas"]
+        };
+
+        const checkItems = [
+            "óleo", "água", "radiador", "conexões", "pneus", "abastecimento", 
+            "garfo", "torre", "freio", "luz", "buzina", "seta", "mangueira", 
+            "ruído", "painel", "limpeza", "extintor", "cinto", "filtro"
+        ];
+
+        // Elementos DOM
+        const fileInput = document.getElementById('fileUpload');
+        const selTurno = document.getElementById('filterTurno');
+        const selOperador = document.getElementById('filterOperador');
+        const inpDate = document.getElementById('filterData');
+        
+        // --- UPLOAD E PROCESSAMENTO ---
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            let rawName = file.name.split('.').slice(0, -1).join('.');
+            let cleanName = rawName.replace(/\s*\(.*?\)/g, "").trim();
+
+            const badge = document.getElementById('fileInfoBadge');
+            const nameDisplay = document.getElementById('fileNameDisplay');
+            
+            nameDisplay.innerText = cleanName.toUpperCase();
+            badge.classList.remove('hidden'); 
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                const data = new Uint8Array(evt.target.result);
+                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rawJson = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
+                
+                if(rawJson.length > 0) {
+                    mapColumns(rawJson[0]);
+                    allData = rawJson;
+                    populateFilters();
+                    analyzeMissingShifts(allData); // Nova função de análise
+                    applyFilters();
+                } else {
+                    alert("A planilha parece estar vazia!");
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // --- MAPEAR COLUNAS ---
+        function mapColumns(firstRow) {
+            const excelHeaders = Object.keys(firstRow);
+            const findHeader = (terms) => {
+                return excelHeaders.find(header => {
+                    const h = header.toLowerCase().trim();
+                    return terms.some(t => h.includes(t));
+                });
+            };
+
+            columnMap = {
+                data: findHeader(keyTerms.data),
+                hora: findHeader(keyTerms.hora),
+                turno: findHeader(keyTerms.turno),
+                operador: findHeader(keyTerms.operador),
+                maquina: findHeader(keyTerms.maquina)
+            };
+        }
+
+        // --- NOVA FUNÇÃO: ANALISAR TURNOS FALTANTES ---
+        function analyzeMissingShifts(data) {
+            const container = document.getElementById('missingShiftsContainer');
+            const tbody = document.getElementById('missingShiftsBody');
+            
+            // Estrutura para agrupar: { "02/12/2025": Set("1", "2") }
+            const dateShiftMap = {};
+
+            data.forEach(row => {
+                // Obter data
+                const rawDate = columnMap.data ? row[columnMap.data] : null;
+                if(!rawDate) return;
+                const dateStr = formatDisplayDate(rawDate); // Usa a mesma formatação visual
+
+                // Obter turno (Normaliza para string "1", "2" ou "3")
+                let shiftVal = columnMap.turno ? String(row[columnMap.turno]) : "";
+                let shiftNum = "";
+                if(shiftVal.includes("1")) shiftNum = "1";
+                else if(shiftVal.includes("2")) shiftNum = "2";
+                else if(shiftVal.includes("3")) shiftNum = "3";
+
+                if (dateStr && shiftNum) {
+                    if (!dateShiftMap[dateStr]) {
+                        dateShiftMap[dateStr] = new Set();
+                    }
+                    dateShiftMap[dateStr].add(shiftNum);
+                }
+            });
+
+            // Ordenar datas cronologicamente
+            const sortedDates = Object.keys(dateShiftMap).sort((a,b) => {
+                // Converte dd/mm/yyyy para Date object para ordenar corretamente
+                const [d1, m1, y1] = a.split('/');
+                const [d2, m2, y2] = b.split('/');
+                return new Date(`${y1}-${m1}-${d1}`) - new Date(`${y2}-${m2}-${d2}`);
+            });
+
+            let html = "";
+            let hasMissing = false;
+            const requiredShifts = ["1", "2", "3"];
+
+            sortedDates.forEach(date => {
+                const presentShifts = dateShiftMap[date];
+                // Verifica quais dos obrigatórios não estão no Set
+                const missing = requiredShifts.filter(s => !presentShifts.has(s));
+
+                if (missing.length > 0) {
+                    hasMissing = true;
+                    // Formata os turnos presentes para exibição (ex: "1º, 2º")
+                    const presentDisplay = Array.from(presentShifts).sort().map(s => s + "º Turno").join(", ");
+                    // Formata os ausentes
+                    const missingDisplay = missing.map(s => `<span class="font-bold border-b-2 border-red-400 pb-0.5">${s}º Turno</span>`).join(" e ");
+
+                    html += `
+                        <tr class="alert-row border-b border-amber-100 last:border-0 hover:bg-amber-50/50">
+                            <td class="px-4 py-3 font-medium whitespace-nowrap">${date}</td>
+                            <td class="px-4 py-3 text-slate-500 text-xs">${presentDisplay}</td>
+                            <td class="px-4 py-3 text-red-600 bg-red-50/50">
+                                <i class="ph-fill ph-x-circle mr-1"></i> Falta: ${missingDisplay}
+                            </td>
+                        </tr>
+                    `;
+                }
+            });
+
+            if (hasMissing) {
+                tbody.innerHTML = html;
+                container.classList.remove('hidden');
+            } else {
+                container.classList.add('hidden');
+            }
+        }
+
+        // --- FILTROS ---
+        function populateFilters() {
+            const operators = new Set();
+            const opCol = columnMap.operador;
+            if(opCol) {
+                allData.forEach(row => { if(row[opCol]) operators.add(row[opCol]); });
+            }
+            selOperador.innerHTML = '<option value="all">Todos os Operadores</option>';
+            Array.from(operators).sort().forEach(op => {
+                const option = document.createElement('option');
+                option.value = op;
+                option.textContent = op;
+                selOperador.appendChild(option);
+            });
+        }
+
+        function resetFilters() {
+            selTurno.value = 'all';
+            selOperador.value = 'all';
+            inpDate.value = ''; 
+            applyFilters();
+        }
+
+        function applyFilters() {
+            const turnoVal = selTurno.value;
+            const opVal = selOperador.value;
+            const dateVal = inpDate.value; 
+
+            const filtered = allData.filter(row => {
+                const rowTurno = columnMap.turno ? String(row[columnMap.turno]).trim() : "";
+                const rowOp = columnMap.operador ? row[columnMap.operador] : "";
+                const rowDateRaw = columnMap.data ? row[columnMap.data] : null;
+                const rowDateNormalized = normalizeDateForFilter(rowDateRaw);
+
+                const matchTurno = turnoVal === 'all' || rowTurno == turnoVal;
+                const matchOp = opVal === 'all' || rowOp == opVal;
+                const matchDate = !dateVal || rowDateNormalized === dateVal;
+
+                return matchTurno && matchOp && matchDate;
+            });
+
+            renderDashboard(filtered);
+        }
+
+        function normalizeDateForFilter(val) {
+            if (!val) return null;
+            let dateObj = null;
+
+            if (val instanceof Date) {
+                dateObj = val;
+            } 
+            else if (typeof val === 'number') {
+                dateObj = new Date(Math.round((val - 25569) * 86400 * 1000));
+            }
+
+            if (dateObj) {
+                const year = dateObj.getFullYear();
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const day = String(dateObj.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            }
+            return null;
+        }
+
+        // --- RENDERIZAÇÃO ---
+        function renderDashboard(data) {
+            let approved = 0, reproved = 0;
+            let failuresCount = {};
+            let opCount = {};
+            let html = "";
+
+            data.forEach(row => {
+                let currentFailures = [];
+                
+                Object.keys(row).forEach(key => {
+                    if (checkItems.some(item => key.toLowerCase().includes(item))) {
+                        const val = String(row[key]).toLowerCase().trim();
+                        if (failTerms.includes(val)) {
+                            currentFailures.push(key);
+                            failuresCount[key] = (failuresCount[key] || 0) + 1;
+                        }
+                    }
+                });
+
+                const isOk = currentFailures.length === 0;
+                if(isOk) approved++; else reproved++;
+
+                const dataVal = columnMap.data ? row[columnMap.data] : "N/D";
+                const horaVal = columnMap.hora ? row[columnMap.hora] : "";
+                const turnoVal = columnMap.turno ? row[columnMap.turno] : "-";
+                const opVal = columnMap.operador ? row[columnMap.operador] : "Desconhecido";
+                const maqVal = columnMap.maquina ? row[columnMap.maquina] : "-";
+
+                opCount[opVal] = (opCount[opVal] || 0) + 1;
+
+                const badge = isOk 
+                    ? `<span class="inline-flex items-center gap-1 bg-green-100 text-green-700 px-2.5 py-1 rounded-full text-xs font-bold border border-green-200"><i class="ph-fill ph-check-circle"></i> OK</span>`
+                    : `<span class="inline-flex items-center gap-1 bg-red-100 text-red-700 px-2.5 py-1 rounded-full text-xs font-bold border border-red-200"><i class="ph-fill ph-warning-circle"></i> FALHA</span>`;
+
+                html += `
+                    <tr class="hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors">
+                        <td class="px-4 py-3 whitespace-nowrap font-medium text-slate-700">${formatDisplayDate(dataVal)}</td>
+                        <td class="px-4 py-3 whitespace-nowrap text-slate-500">${formatTime(horaVal)}</td>
+                        <td class="px-4 py-3 text-center"><span class="bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-xs font-bold">${turnoVal}</span></td>
+                        <td class="px-4 py-3 font-semibold text-blue-900">${opVal}</td>
+                        <td class="px-4 py-3 text-slate-600">${maqVal}</td>
+                        <td class="px-4 py-3 text-center">${badge}</td>
+                        <td class="px-4 py-3 text-xs leading-relaxed max-w-xs truncate" title="${currentFailures.join(', ')}">
+                            ${currentFailures.length > 0 ? `<span class="text-red-600 font-semibold">• ${currentFailures.join('<br>• ')}</span>` : '<span class="text-slate-300">-</span>'}
+                        </td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('tableBody').innerHTML = html || '<tr><td colspan="7" class="text-center py-8 text-slate-500">Nenhum dado encontrado para este filtro.</td></tr>';
+            
+            const total = data.length;
+            document.getElementById('kpi-total').innerText = total;
+            document.getElementById('kpi-aprovados').innerText = approved;
+            document.getElementById('kpi-reprovados').innerText = reproved;
+            document.getElementById('kpi-conformidade').innerText = total ? ((approved/total)*100).toFixed(1) + "%" : "0%";
+
+            updateCharts(failuresCount, opCount);
+        }
+
+        function formatDisplayDate(val) {
+            if (!val) return "-";
+            if (val instanceof Date) return val.toLocaleDateString('pt-PT');
+            if (typeof val === 'number') { 
+                 return new Date(Math.round((val - 25569)*86400*1000)).toLocaleDateString('pt-PT');
+            }
+            return String(val).split('T')[0];
+        }
+
+        function formatTime(val) {
+            if (!val) return "";
+            if (val instanceof Date) return val.toLocaleTimeString('pt-PT', {hour:'2-digit', minute:'2-digit'});
+            if (typeof val === 'number') {
+                const totalSeconds = Math.floor(val * 86400);
+                const h = Math.floor(totalSeconds / 3600);
+                const m = Math.floor((totalSeconds % 3600) / 60);
+                return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+            }
+            return String(val);
+        }
+
+        let chartInstance1 = null, chartInstance2 = null;
+
+        function updateCharts(failures, operators) {
+            const ctx1 = document.getElementById('chartFalhas').getContext('2d');
+            if(chartInstance1) chartInstance1.destroy();
+            const sortedFailures = Object.entries(failures).sort((a,b) => b[1] - a[1]).slice(0, 5);
+            chartInstance1 = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: sortedFailures.map(x => x[0]),
+                    datasets: [{ label: 'Ocorrências', data: sortedFailures.map(x => x[1]), backgroundColor: '#ef4444', borderRadius: 6 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+
+            const ctx2 = document.getElementById('chartOperador').getContext('2d');
+            if(chartInstance2) chartInstance2.destroy();
+            const sortedOps = Object.entries(operators).sort((a,b) => b[1] - a[1]).slice(0, 5);
+            chartInstance2 = new Chart(ctx2, {
+                type: 'doughnut',
+                data: {
+                    labels: sortedOps.map(x => x[0]),
+                    datasets: [{ data: sortedOps.map(x => x[1]), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899'], borderWidth: 0 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } }, cutout: '70%' }
+            });
+        }
+    </script>
+</body>
+</html>
